@@ -1,125 +1,131 @@
-from sympy import Symbol, Expr, Add, Mul, Pow, diff, latex, Integer
+from sympy import Symbol, Expr, Mul, Add, Pow, Integer, Float, sin, cos, tan, log, exp, latex
 
-def solve_derivative_step_by_step(expr: Expr, var_symbol: Symbol):
+def solve_derivative_step_by_step(expr: Expr, var_symbol: Symbol) -> list[dict]:
     steps = []
-    step_counter = 0
+    var_str = str(var_symbol)
 
-    def add_step(rule_name: str, explanation: str, current_expr):
-        nonlocal step_counter
-        step_counter += 1
+    def diff_op(target_latex: str) -> str:
+        """Helper para envolver una expresión en el operador diferencial d/dx[...]."""
+        return f"\\frac{{d}}{{d{var_str}}}\\left[{target_latex}\\right]"
+
+    def add_step(rule_name: str, explanation: str, expression_latex: str):
         steps.append({
-            "step_number": step_counter,
+            "step_number": len(steps) + 1,
             "rule_name": rule_name,
             "explanation": explanation,
-            "expression_latex": latex(current_expr)
+            "expression_latex": expression_latex
         })
 
-    def _differentiate(node):
-        # 1. Regla Constante
-        if not node.has(var_symbol):
+    # Paso inicial
+    add_step(
+        "Expresión Inicial",
+        f"Función a derivar con respecto a ${var_str}$.",
+        diff_op(latex(expr))
+    )
+
+    def _differentiate(node: Expr) -> Expr:
+        # 1. Constante
+        if node.is_number:
             add_step(
                 "Regla de la Constante",
-                f"La derivada de la constante ${latex(node)}$ es $0$.",
-                Integer(0)
+                f"La derivada de una constante es $0$.",
+                "0"
             )
             return Integer(0)
 
-        # 2. Variable Identidad
+        # 2. Variable respecto a la cual se deriva
         if node == var_symbol:
             add_step(
-                "Regla de la Variable",  # Corregido typo "Varibale"
-                f"La derivada de ${var_symbol.name}$ respecto a ${var_symbol.name}$ es $1$.",
-                Integer(1)
+                "Regla de la Variable",
+                f"La derivada de ${var_str}$ respecto a ${var_str}$ es $1$.",
+                "1"
             )
             return Integer(1)
 
-        # 3. Regla de la suma
+        # 3. Regla de la Suma / Resta
         if isinstance(node, Add):
+            terms_latex = " + ".join([diff_op(latex(arg)) for arg in node.args])
             add_step(
                 "Regla de la Suma",
-                f"Separamos la expresión ${latex(node)}$ en derivadas independientes.",
-                node
+                f"Separamos la derivada de cada término.",
+                terms_latex
             )
-            terms_derived = [_differentiate(arg) for arg in node.args]
-            result = Add(*terms_derived)
-            add_step(
-                "Resultado Parcial de la Suma",
-                "Unimos los términos derivados.",
-                result
-            )
-            return result
+            return sum((_differentiate(arg) for arg in node.args), Integer(0))
 
-        # 4. Factores constantes y regla del producto
+        # 4. Multiplicación (Cociente, Factor Constante, Producto)
         if isinstance(node, Mul):
+            # A. Regla del Cociente
+            numer, denom = node.as_numer_denom()
+            if denom != Integer(1):
+                add_step(
+                    "Regla del Cociente",
+                    f"Aplicamos $\\left(\\frac{{u}}{{v}}\\right)' = \\frac{{u'v - uv'}}{{v^2}}$ a ${diff_op(latex(node))}$.",
+                    f"\\frac{{{diff_op(latex(numer))} \\cdot \\left({latex(denom)}\\right) - \\left({latex(numer)}\\right) \\cdot {diff_op(latex(denom))}}}{{\\left({latex(denom)}\\right)^2}}"
+                )
+                du = _differentiate(numer)
+                dv = _differentiate(denom)
+                result = (du * denom - numer * dv) / (denom ** 2)
+                return result
+
+            # B. Factor Constante
             coeff, non_coeff = node.as_coeff_Mul()
             if coeff != 1:
                 add_step(
                     "Factor Constante",
-                    f"Extraemos la constante ${latex(coeff)}$ fuera de la derivada.",
-                    node
+                    f"Extraemos la constante ${latex(coeff)}$ fuera del operador diferencial.",
+                    f"{latex(coeff)} \\cdot {diff_op(latex(non_coeff))}"
                 )
                 result = coeff * _differentiate(non_coeff)
                 return result
 
+            # C. Regla del Producto
             if len(node.args) == 2:
                 u, v = node.args
                 add_step(
                     "Regla del Producto",
-                    f"Aplicamos $(u \\cdot v)' = u'v + uv'$ a la expresión ${latex(node)}$.",
-                    node
+                    f"Aplicamos la regla del producto a ${diff_op(latex(node))}$.",
+                    f"{diff_op(latex(u))} \\cdot \\left({latex(v)}\\right) + \\left({latex(u)}\\right) \\cdot {diff_op(latex(v))}"
                 )
                 du = _differentiate(u)
                 dv = _differentiate(v)
-                result = du * v + u * dv
-                add_step(
-                    "Ensamblaje del Producto",
-                    "Resultado de la regla del producto.",
-                    result
-                )
-                return result
+                return du * v + u * dv
 
-        # 5. Regla de la potencia
+        # 5. Regla de la Potencia y Cadena
         if isinstance(node, Pow):
-            base, exp = node.args
-            if not exp.has(var_symbol):
+            base, exp_val = node.args
+            if exp_val.is_number and base == var_symbol:
+                res = exp_val * (base ** (exp_val - 1))
                 add_step(
                     "Regla de la Potencia",
-                    f"Para ${latex(node)}$, bajamos el exponente ${latex(exp)}$ y restamos $1$ al exponente.",
-                    node
+                    f"Bajamos el exponente ${latex(exp_val)}$ y le restamos $1$.",
+                    latex(res)
+                )
+                return res
+            elif exp_val.is_number:
+                add_step(
+                    "Regla de la Cadena (Potencia)",
+                    f"Aplicamos regla de la potencia a la base compuesta.",
+                    f"{latex(exp_val)} \\cdot \\left({latex(base)}\\right)^{{{latex(exp_val - 1)}}} \\cdot {diff_op(latex(base))}"
                 )
                 dbase = _differentiate(base)
-                result = exp * (base ** (exp - 1)) * dbase
-                return result
+                return exp_val * (base ** (exp_val - 1)) * dbase
 
-        # 6. Regla General / Derivación directa
+        # 6. Derivada Directa de Funciones Trigonométricas/Otras
+        diff_direct = node.diff(var_symbol)
         add_step(
-            "Regla General / Cadena",
-            f"Derivamos la función ${latex(node)}$.",
-            node
+            "Derivada Directa",
+            f"Calculamos la derivada de ${latex(node)}$.",
+            latex(diff_direct)
         )
-        derived_node = diff(node, var_symbol)
-        add_step(
-            "Resultado de Derivación Directa",
-            "Obtenemos la derivada de la función.",
-            derived_node
-        )
-        return derived_node
+        return diff_direct
 
+    final_result = _differentiate(expr)
 
-    add_step(
-        "Expresión Inicial",
-        f"Función a derivar con respecto a ${var_symbol.name}$.",
-        expr
-    )
-
-    _differentiate(expr)
-
-
-    final_derived = diff(expr, var_symbol)
+    # Paso final de simplificación
     add_step(
         "Resultado Final Simplificado",
-        "Resultado final de la derivada completa.",
-        final_derived
+        "Respuesta final obtenida tras operar las derivadas.",
+        latex(final_result)
     )
 
     return steps
